@@ -28,14 +28,14 @@ export default function IssueDetail() {
 
   return (
     <div style={{ maxWidth: 800, margin: '20px auto' }}>
-      <h1>#{issue.number} {issue.title}</h1>
-      <p>{issue.description}</p>
-      <p>Status: {issue.status} | Priority: {issue.priority}</p>
-      <button onClick={() => patch.mutate({ version: issue.version, status })}>Cambiar status</button>
+      <h1>#{issue!.number} {issue!.title}</h1>
+      <p>{issue!.description}</p>
+      <p>Status: {issue!.status} | Priority: {issue!.priority}</p>
+      <button onClick={() => patch.mutate({ version: issue!.version, status })}>Cambiar status</button>
 
       <h3>Comentarios</h3>
       <ul>
-        {comments?.map((c: any) => (
+        {comments?.map((c) => (
           <li key={c.id}>{c.body}</li>
         ))}
       </ul>
