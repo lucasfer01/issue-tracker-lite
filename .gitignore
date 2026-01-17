@@ -1,0 +1,9 @@
+node_modules/
+.pnpm/
+dist/
+.env
+.env.local
+.env.test
+coverage/
+.vscode/
+.DS_Store

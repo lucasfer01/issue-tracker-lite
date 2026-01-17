@@ -1,0 +1,149 @@
+// Prisma schema for Issue Tracker Lite
+// Data model aligned with requirements
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Role {
+  OWNER
+  MAINTAINER
+  REPORTER
+}
+
+enum IssueStatus {
+  OPEN
+  IN_PROGRESS
+  BLOCKED
+  DONE
+}
+
+enum IssuePriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum IssueEventType {
+  ISSUE_CREATED
+  STATUS_CHANGED
+  ASSIGNEE_CHANGED
+  ISSUE_UPDATED
+  COMMENT_ADDED
+}
+
+model User {
+  id           String    @id @default(uuid())
+  email        String    @unique
+  name         String
+  passwordHash String
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  ownedProjects Project[] @relation("ProjectOwner")
+  memberships   ProjectMember[]
+  reportedIssues Issue[]   @relation("IssueReporter")
+  assignedIssues Issue[]   @relation("IssueAssignee")
+  comments       Comment[]
+  refreshTokens  RefreshToken[]
+  actorEvents    IssueEvent[] @relation("IssueEventActor")
+}
+
+model Project {
+  id        String         @id @default(uuid())
+  key       String         @unique
+  name      String
+  createdAt DateTime       @default(now()) @map("created_at")
+  ownerId   String         @map("owner_id")
+  owner     User           @relation("ProjectOwner", fields: [ownerId], references: [id])
+
+  members   ProjectMember[]
+  issues    Issue[]
+  counter   ProjectCounter?
+}
+
+model ProjectMember {
+  project   Project @relation(fields: [projectId], references: [id])
+  projectId String  @map("project_id")
+  user      User    @relation(fields: [userId], references: [id])
+  userId    String  @map("user_id")
+  role      Role
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@id([projectId, userId])
+}
+
+model Issue {
+  id          String        @id @default(uuid())
+  project     Project       @relation(fields: [projectId], references: [id])
+  projectId   String        @map("project_id")
+  number      Int           @map("number")
+  title       String
+  description String
+  status      IssueStatus
+  priority    IssuePriority
+  assignee    User?         @relation("IssueAssignee", fields: [assigneeId], references: [id])
+  assigneeId  String?       @map("assignee_id")
+  reporter    User          @relation("IssueReporter", fields: [reporterId], references: [id])
+  reporterId  String        @map("reporter_id")
+  createdAt   DateTime      @default(now()) @map("created_at")
+  updatedAt   DateTime      @updatedAt @map("updated_at")
+  closedAt    DateTime?     @map("closed_at")
+  version     Int           @default(1)
+
+  comments     Comment[]
+  events       IssueEvent[]
+
+  @@unique([projectId, number])
+  @@index([projectId, createdAt, id], map: "issues_project_created_id_idx")
+  @@index([projectId, status, createdAt, id], map: "issues_project_status_created_id_idx")
+  @@index([assigneeId, status], map: "issues_assignee_status_idx")
+}
+
+model Comment {
+  id        String   @id @default(uuid())
+  issue     Issue    @relation(fields: [issueId], references: [id])
+  issueId   String   @map("issue_id")
+  author    User     @relation(fields: [authorId], references: [id])
+  authorId  String   @map("author_id")
+  body      String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([issueId, createdAt], map: "comments_issue_created_idx")
+}
+
+model IssueEvent {
+  id        String         @id @default(uuid())
+  issue     Issue          @relation(fields: [issueId], references: [id])
+  issueId   String         @map("issue_id")
+  actor     User           @relation("IssueEventActor", fields: [actorId], references: [id])
+  actorId   String         @map("actor_id")
+  type      IssueEventType
+  payload   Json           @map("payload")
+  createdAt DateTime       @default(now()) @map("created_at")
+
+  @@index([issueId, createdAt], map: "issue_events_issue_created_idx")
+}
+
+model ProjectCounter {
+  project   Project @relation(fields: [projectId], references: [id])
+  projectId String  @id @map("project_id")
+  nextNumber Int    @default(1) @map("next_number")
+}
+
+model RefreshToken {
+  id         String   @id @default(uuid())
+  user       User     @relation(fields: [userId], references: [id])
+  userId     String   @map("user_id")
+  tokenHash  String   @map("token_hash")
+  createdAt  DateTime @default(now()) @map("created_at")
+  expiresAt  DateTime @map("expires_at")
+  revokedAt  DateTime? @map("revoked_at")
+
+  @@index([userId, tokenHash], map: "refresh_user_token_hash_idx")
+}

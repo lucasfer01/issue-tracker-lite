@@ -1,0 +1,20 @@
+version: "3.9"
+services:
+  db:
+    image: postgres:16
+    container_name: issue-tracker-db
+    environment:
+      POSTGRES_USER: issue
+      POSTGRES_PASSWORD: issue
+      POSTGRES_DB: issue_tracker
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U issue -d issue_tracker"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+volumes:
+  pgdata:
