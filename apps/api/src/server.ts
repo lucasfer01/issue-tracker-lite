@@ -17,8 +17,9 @@ export const createServer = (env: Env) => {
 
   app.use(pinoHttp({
     customLogLevel: function (res, err) {
-      if (res.statusCode >= 500 || err) return 'error';
-      if (res.statusCode >= 400) return 'warn';
+      const code = res.statusCode ?? 0;
+      if (code >= 500 || err) return 'error';
+      if (code >= 400) return 'warn';
       return 'info';
     },
     genReqId: function (req, res) {
