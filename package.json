@@ -11,7 +11,7 @@
     "test": "pnpm -C apps/api test",
     "format": "prettier -w .",
     "typecheck": "pnpm -C apps/api run typecheck && pnpm -C apps/web run typecheck",
-    "check": "pnpm -C apps/api run check && pnpm -C apps/web run check",
+    "check": "pnpm run lint && pnpm -C apps/api run check && pnpm -C apps/web run check",
     "lint": "eslint apps/api/src apps/web/src packages/shared/src --ext .ts,.tsx"
   },
   "devDependencies": {
