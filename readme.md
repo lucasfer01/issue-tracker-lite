@@ -1,230 +1,117 @@
-ACTUÁ COMO SENIOR FULLSTACK ENGINEER. Quiero que construyas una app “Issue Tracker Lite” fullstack profesional (nivel entrevista) con Postgres + Node.js/Express + React. Priorizá ejecución y calidad pragmática (no over-engineering), con buen manejo de trade-offs, errores, validación, seguridad básica y performance razonable.
+# Issue Tracker Lite — README
 
-========================
-1) STACK / ESTRUCTURA
-========================
-- Monorepo (recomendado) con pnpm workspaces:
-  - apps/api (Node.js + Express + TypeScript)
-  - apps/web (React + TypeScript + Vite)
-  - packages/shared (tipos DTO compartidos opcional)
-- DB: Postgres
-- ORM: Prisma (rápido para entregar) PERO mantené queries críticas claras (y si hace falta, SQL raw puntual).
-- Validación: Zod (backend) + zod en frontend si ayuda.
-- Fetching/caching: React Query (TanStack Query).
-- Routing: React Router.
-- Tests backend: Jest o Vitest + Supertest (mínimo 2–4 tests).
-- Lint/format: Biome o ESLint/Prettier (simple).
+Una guía completa del flujo de las apps (API + Web), arquitectura, setup y referencia rápida para desarrollar y evaluar este proyecto.
 
-========================
-2) REQUERIMIENTOS FUNCIONALES (MVP)
-========================
-A) Autenticación
-- Login con email + password.
-- Password hashed (bcrypt).
-- Auth basada en JWT:
-  - Access token corto (ej 15m).
-  - Refresh token (ej 7d) con rotación y persistencia en DB (hash del refresh).
-  - Guardar tokens en cookies httpOnly (recomendado) para SPA.
-- Endpoints:
-  - POST /auth/login
-  - POST /auth/refresh
-  - POST /auth/logout
-  - GET /me
+## Visión General
 
-B) Proyectos + Permisos (RBAC simple)
-- Un usuario puede tener múltiples proyectos.
-- Membresía por proyecto con roles:
-  - OWNER, MAINTAINER, REPORTER
-- Reglas:
-  - Ver issues: cualquier miembro del proyecto.
-  - Crear issue: MAINTAINER o OWNER.
-  - Cambiar status/assignee: MAINTAINER o OWNER.
-  - Comentar: cualquier miembro.
-- Endpoints:
-  - GET /projects (mis proyectos)
-  - POST /projects (crea proyecto, creador=OWNER)
-  - GET /projects/:projectId
-  - POST /projects/:projectId/members (solo OWNER; agrega miembros por email + role)
+- Monorepo PNPM con dos apps y un paquete compartido:
+  - `apps/api`: API REST en Node.js + Express + TypeScript + Prisma (Postgres)
+  - `apps/web`: SPA en React + Vite + TypeScript + React Query
+  - `packages/shared`: Tipos compartidos (DTOs básicos)
+- Autenticación con JWT (access 15m + refresh 7d) en cookies `httpOnly`.
+- RBAC por proyecto: roles `OWNER`, `MAINTAINER`, `REPORTER`.
+- Paginación estable por cursor en listas de issues.
+- Auditoría básica de cambios de issue via `issue_events`.
 
-C) Issues
-- Un issue pertenece a un proyecto.
-- Campos: title, description, status, priority, assignee, reporter, timestamps.
-- Status: OPEN | IN_PROGRESS | BLOCKED | DONE
-- Priority: LOW | MEDIUM | HIGH | URGENT
-- Endpoints:
-  - GET /projects/:projectId/issues
-    - filtros: status, assigneeId, q (search en title/description)
-    - orden: created_at desc (o updated_at desc)
-    - paginación: cursor (NO offset) para estabilidad
-    - query params: ?limit=20&cursor=<opaque>
-    - response: { items: Issue[], nextCursor: string | null }
-  - POST /projects/:projectId/issues
-  - GET /issues/:issueId (detalle)
-  - PATCH /issues/:issueId
-    - permitir update parcial: status, title, description, priority, assigneeId (nullable)
-    - usar optimistic locking con campo version (incremental) o updatedAt check.
-  - POST /issues/:issueId/comments
-  - GET /issues/:issueId/comments
+## Arquitectura y Flujo End-to-End
 
-D) Auditoría básica (muy de entrevista)
-- Registrar eventos importantes en issue_events:
-  - ISSUE_CREATED, STATUS_CHANGED, ASSIGNEE_CHANGED, ISSUE_UPDATED, COMMENT_ADDED
-- Guardar: actorId, issueId, type, payload (jsonb), createdAt.
-- Crear eventos dentro de la misma transacción cuando corresponda.
+1) Login (Web → API)
+   - La pantalla `Login` envía `POST /auth/login` con email+password.
+   - La API valida credenciales, firma `access_token` y `refresh_token` y los setea como cookies `httpOnly`.
+   - En éxito, la Web redirige a `/projects`.
 
-========================
-3) MODELO DE DATOS (Postgres)
-========================
-Entidades mínimas:
-- users(id, email UNIQUE, name, password_hash, created_at)
-- projects(id, key UNIQUE, name, created_at, owner_id FK users)
-- project_members(project_id FK, user_id FK, role, created_at, UNIQUE(project_id, user_id))
-- issues(
-    id,
-    project_id FK,
-    number (secuencial por proyecto),
-    title,
-    description,
-    status,
-    priority,
-    assignee_id FK users NULL,
-    reporter_id FK users,
-    created_at,
-    updated_at,
-    closed_at NULL,
-    version INT default 1,
-    UNIQUE(project_id, number)
-  )
-- comments(id, issue_id FK, author_id FK, body, created_at)
-- issue_events(id, issue_id FK, actor_id FK, type, payload jsonb, created_at)
+2) Proyectos (Web → API)
+   - La pantalla `Projects` llama `GET /projects` para listar los proyectos del usuario (según membresías).
+   - Puede crear un proyecto con `POST /projects` (el creador queda como `OWNER`).
+   - Para entrar a un proyecto, navega a `/projects/:projectId/issues`.
 
-Generación del “number” por proyecto:
-- Opción A (simple y consistente): tabla project_counters(project_id PK, next_number INT)
-  - En transacción: SELECT FOR UPDATE counter, usar next_number, incrementar.
-- Opción B: MAX(number)+1 con lock (menos ideal). Preferir A.
+3) Issues List (Web → API)
+   - La pantalla `IssuesList` llama `GET /projects/:projectId/issues` con filtros `status`, `q` y `cursor`.
+   - La API responde `{ items, nextCursor }`; si `nextCursor` existe, el botón “Load more” pide la siguiente página.
 
-Índices (sí o sí, justificados por queries):
-- issues(project_id, created_at DESC, id DESC)  -> lista con cursor
-- issues(project_id, status, created_at DESC, id DESC) -> filtros por status
-- issues(assignee_id, status) -> “mis issues”
-- comments(issue_id, created_at) -> detalle
-Nice to have:
-- Full-text search (tsvector) sobre title/description + GIN index.
+4) Issue Detail (Web → API)
+   - La pantalla `IssueDetail` llama `GET /issues/:issueId` y `GET /issues/:issueId/comments`.
+   - Cambios de `status` o `assignee` requieren rol `OWNER`/`MAINTAINER` y se envían con `PATCH /issues/:issueId` usando `version` para optimistic locking.
+   - Los comentarios se crean con `POST /issues/:issueId/comments`.
 
-========================
-4) API QUALITY (Contrato, errores, seguridad, logging)
-========================
-- Formato de error unificado SIEMPRE:
-  { "error": { "code": "STRING_CODE", "message": "human readable", "details": [...]? } }
-- Status codes:
-  - 400 validation
-  - 401 no autenticado
-  - 403 no autorizado (permiso)
-  - 404 no existe
-  - 409 conflicto (unique, optimistic lock)
-  - 500 error interno (sin filtrar stack al cliente)
-- Middlewares:
-  - auth (lee cookie, valida JWT)
-  - requireProjectRole(minRole)
-  - requestId + logging (pino/pino-http)
-- Seguridad básica:
-  - helmet
-  - cors restrictivo (CORS_ORIGIN)
-  - rate limit en /auth/login
-- Env vars:
-  - DATABASE_URL
-  - JWT_ACCESS_SECRET
-  - JWT_REFRESH_SECRET
-  - PORT
-  - CORS_ORIGIN
-  - NODE_ENV
+5) Refresh / Logout
+   - `POST /auth/refresh` rota el refresh token: invalida el anterior, emite uno nuevo y un nuevo access.
+   - `POST /auth/logout` invalida el refresh de la cookie y limpia cookies.
 
-========================
-5) FRONTEND (React) — PANTALLAS Y FLUJOS
-========================
-Pantallas mínimas:
-1) /login
-- form email/password
-- on success -> /projects
+## Modelo de Datos (Prisma / Postgres)
 
-2) /projects
-- lista de proyectos del usuario
-- botón “Create project”
-- entrar a proyecto -> /projects/:projectId/issues
+Entidades principales (ver `apps/api/prisma/schema.prisma`):
+- `users`: email único, nombre, `passwordHash`.
+- `projects`: `key` único, `ownerId`.
+- `project_members`: relación usuario–proyecto + `role`.
+- `issues`: por proyecto, con `number` secuencial, `status`, `priority`, `assigneeId?`, `reporterId`, `version`.
+- `comments`: por `issue`, con `authorId` y cuerpo.
+- `issue_events`: auditoría (`ISSUE_CREATED`, `STATUS_CHANGED`, etc.).
+- `project_counters`: genera `number` por proyecto de forma atómica.
+- `refresh_tokens`: hash del refresh + expiración y revocación.
 
-3) /projects/:projectId/issues
-- lista con filtros (status, assignee, search q)
-- paginación cursor (Load more)
-- botón “Create issue”
+Índices relevantes para queries:
+- `issues(projectId, createdAt DESC, id DESC)` y variantes por `status` para cursor estable.
+- `comments(issueId, createdAt)` para detalle.
 
-4) /issues/:issueId
-- detalle del issue
-- cambiar status / assignee (si role permite)
-- comments list + add comment
+## Backend (API) — Rutas y Comportamiento
 
-Estrategia de fetching/cache (React Query):
-- query keys incluyen projectId + filtros + cursor
-- mutations invalidan queries relevantes (issues list y issue detail)
-- manejar 401 global: si API devuelve 401 -> redirect /login
+- Autenticación (`apps/api/src/routes/auth.ts`):
+  - `POST /auth/login`: valida credenciales (bcrypt), setea cookies `access_token` (15m) y `refresh_token` (7d), persiste hash del refresh.
+  - `POST /auth/refresh`: verifica refresh, revoca el actual, emite nuevos tokens y actualiza cookies.
+  - `POST /auth/logout`: revoca el refresh de la cookie (si corresponde) y limpia cookies.
+  - Rate limit en `/auth/login` (10 req/min).
 
-UI/UX:
-- Mostrar estados: loading/error/empty
-- Mensajes claros para 400/401/403/409
-- Estilo simple pero prolijo (Tailwind opcional)
+- Usuario actual:
+  - `GET /me`: requiere auth; devuelve `{ id, email, name }`.
 
-========================
-6) TESTS (mínimo 2–4)
-========================
-Backend (Supertest):
-- (1) login ok + /me ok
-- (2) permiso: REPORTER no puede PATCH status => 403
-- (3) validación: create issue sin title => 400
-- (4) paginación cursor: crea N issues y verifica nextCursor y no duplicados (opcional)
+- Proyectos (`apps/api/src/routes/projects.ts`):
+  - `GET /projects`: lista proyectos de membresía del usuario.
+  - `POST /projects`: crea proyecto y asigna `OWNER` (en transacción), inicializa `project_counters`.
+  - `GET /projects/:projectId`: requiere ser miembro; devuelve datos del proyecto.
+  - `POST /projects/:projectId/members`: solo `OWNER`; agrega miembro por email y rol.
 
-Frontend (opcional):
-- test de render states o de login flow (si hay tiempo)
+- Issues (`apps/api/src/routes/issues.ts`):
+  - `GET /projects/:projectId/issues`: requiere membresía; filtros `status`, `assigneeId`, `q`; `limit` (≤50); orden estable `createdAt DESC, id DESC`; cursor base64 `{createdAt}|{id}`.
+  - `POST /projects/:projectId/issues`: solo `OWNER/MAINTAINER`; genera `number` atómico y crea evento `ISSUE_CREATED`.
+  - `GET /issues/:issueId`: requiere membresía del proyecto dueño del issue.
+  - `PATCH /issues/:issueId`: requiere `version` (optimistic locking); cambios en `status`/`assignee` requieren rol elevado; crea eventos apropiados.
 
-========================
-7) ORDEN DE IMPLEMENTACIÓN (commits)
-========================
-Commit 1: scaffold repo + tooling + env example + docker-compose Postgres
-Commit 2: prisma schema + migrations + seed (1 owner, 1 project, issues)
-Commit 3: auth (login/refresh/logout/me) + cookies httpOnly + rate limit
-Commit 4: projects + members + RBAC middleware
-Commit 5: issues CRUD + cursor pagination + índices + eventos auditoría
-Commit 6: comments + events endpoints (si los exponés)
-Commit 7: web scaffold + routing + login + auth handling
-Commit 8: projects UI + issues list UI (filtros + load more)
-Commit 9: issue detail UI + edit + comments
-Commit 10: tests + README final + polish
+- Comentarios (`apps/api/src/routes/comments.ts`):
+  - `GET /issues/:issueId/comments`: lista comentarios del issue.
+  - `POST /issues/:issueId/comments`: requiere membresía; crea comentario y evento `COMMENT_ADDED`.
 
-========================
-8) CRITERIOS DE ACEPTACIÓN (definición de “terminado”)
-========================
-- Puedo loguearme y ver mis proyectos.
-- Puedo crear proyecto y agregar miembro.
-- Puedo listar issues con filtros y cursor pagination estable.
-- Puedo crear issue, actualizar status/assignee (según rol), y comentar.
-- Los errores son consistentes (formato + status codes).
-- Hay al menos 2–4 tests backend pasando.
-- README explica setup (DB, env vars, comandos).
+- Errores (formato unificado):
+  - `{ "error": { "code": "STRING_CODE", "message": "...", "details": ... } }`
+  - Códigos HTTP: 400 (validación), 401 (no autenticado), 403 (permiso), 404 (no existe), 409 (conflicto), 500 (interno).
 
-IMPORTANTE:
-- No inventes endpoints extra innecesarios.
-- No metas arquitectura compleja (DDD extremo) salvo que sea liviana.
-- En cada módulo: typing fuerte, funciones chicas, nombres claros, logs útiles.
-- Si algo es ambiguo, elegí una decisión razonable y documentala en README (“Trade-offs / Assumptions”).
+## Frontend (Web) — Pantallas y Flujos
 
-Ahora: generá el código completo siguiendo esto, con archivos y estructura lista para correr.
+- `Login` (`apps/web/src/pages/Login.tsx`):
+  - Form simple; `api.login(email, password)`; en éxito, `navigate('/projects')`.
 
-========================
-Setup & Run (Windows/PowerShell)
-========================
+- `Projects` (`apps/web/src/pages/Projects.tsx`):
+  - Usa React Query para `api.myProjects()`.
+  - Crear proyecto con `api.createProject(key, name)` y refresca la lista.
+  - Navega a `/projects/:projectId/issues`.
 
-- Prerrequisitos: Node.js 18+, pnpm 9, Docker.
-- Variables de entorno: crear `.env` en `apps/api` (puedes copiar de `.env.example`).
+- `IssuesList` (`apps/web/src/pages/IssuesList.tsx`):
+  - Query key incluye `projectId`, `status`, `q`, `cursor`.
+  - “Load more” setea `cursor` con `nextCursor` devuelto.
 
-1) Levantar Postgres (Docker):
+- `IssueDetail` (`apps/web/src/pages/IssueDetail.tsx`):
+  - Muestra datos del issue; permite cambiar `status` enviando `version` actual.
+  - Lista y crea comentarios; invalida queries al mutar.
+
+- Cliente API (`apps/web/src/api/client.ts`):
+  - `fetch` con `credentials: 'include'` y `BASE_URL = VITE_API_URL || http://localhost:4000`.
+  - Si la respuesta es `401`, lanza error. Existe `api.onUnauthorized` para enganchar lógica de refresh si se desea.
+
+## Setup (Windows / PowerShell)
+
+Prerrequisitos: Node.js 18+, PNPM 9, Docker Desktop.
+
+1) Levantar Postgres (Docker Compose en raíz):
 
 ```powershell
 docker compose up -d
@@ -236,13 +123,25 @@ docker compose up -d
 pnpm -w install
 ```
 
-3) Generar Prisma client + migraciones + seed:
+3) Variables de entorno (crear `apps/api/.env`):
+
+```dotenv
+# apps/api/.env
+DATABASE_URL="postgresql://issue:issue@localhost:5432/issue_tracker?schema=public"
+JWT_ACCESS_SECRET="dev-access-secret-change-me"
+JWT_REFRESH_SECRET="dev-refresh-secret-change-me"
+PORT="4000"
+CORS_ORIGIN="http://localhost:5173"
+NODE_ENV="development"
+```
+
+4) Prisma client + migraciones + seed:
 
 ```powershell
 cd apps/api; pnpm prisma:generate; pnpm prisma:migrate; pnpm prisma:seed; cd ../..
 ```
 
-4) Correr API y Web en dev:
+5) Correr API y Web en dev:
 
 ```powershell
 pnpm dev:api
@@ -252,32 +151,110 @@ pnpm dev:web
 - API: `http://localhost:4000`
 - Web: `http://localhost:5173`
 
-Credenciales seed:
-- owner@example.com / password123
-- reporter@example.com / password123
+Credenciales de seed:
+- `owner@example.com` / `password123`
+- `reporter@example.com` / `password123`
 
-========================
-Comandos útiles
-========================
-- Tests backend:
+## Referencia Rápida de API (cURL)
 
-```powershell
-cd apps/api; pnpm test
-```
+Nota: las rutas autenticadas usan cookies; puedes probar en Postman o desde la Web.
 
-- Prisma (desde `apps/api`):
+- Login:
 
 ```powershell
-pnpm prisma:migrate
-pnpm prisma:seed
+curl -i -X POST http://localhost:4000/auth/login -H "Content-Type: application/json" -d '{"email":"owner@example.com","password":"password123"}'
 ```
 
-========================
-Trade-offs / Assumptions
-========================
-- Refresh token: JWT firmado + persistencia hash en DB con rotación en `/auth/refresh`.
-- Paginación cursor: Orden estable por `created_at DESC, id DESC`; cursor es base64 `createdAt|id`.
-- Optimistic locking: `PATCH /issues/:issueId` usa `updateMany` con `version` para atomicidad; si no coincide => 409.
-- Generación de `number` de issue: SQL raw con `UPDATE ... RETURNING`, atómico dentro de transacción.
-- Búsqueda `q`: `ILIKE` sobre `title/description` por simplicidad (FTS opcional a futuro).
-- Cookies: `httpOnly`, `sameSite=lax`; `secure` según `NODE_ENV`.
+- Mis proyectos:
+
+```powershell
+curl -i http://localhost:4000/projects
+```
+
+- Crear proyecto:
+
+```powershell
+curl -i -X POST http://localhost:4000/projects -H "Content-Type: application/json" -d '{"key":"DEMO2","name":"Nuevo Proyecto"}'
+```
+
+- Listar issues con cursor:
+
+```powershell
+curl -i "http://localhost:4000/projects/<projectId>/issues?status=OPEN&limit=10"
+```
+
+- Detalle de issue:
+
+```powershell
+curl -i http://localhost:4000/issues/<issueId>
+```
+
+- Cambiar status (optimistic locking):
+
+```powershell
+curl -i -X PATCH http://localhost:4000/issues/<issueId> -H "Content-Type: application/json" -d '{"version":1,"status":"IN_PROGRESS"}'
+```
+
+- Comentarios:
+
+```powershell
+curl -i http://localhost:4000/issues/<issueId>/comments
+curl -i -X POST http://localhost:4000/issues/<issueId>/comments -H "Content-Type: application/json" -d '{"body":"Comentario"}'
+```
+
+- Refresh / Logout:
+
+```powershell
+curl -i -X POST http://localhost:4000/auth/refresh
+curl -i -X POST http://localhost:4000/auth/logout
+```
+
+## Testing y Lint
+
+- Backend tests (Vitest + Supertest):
+
+```powershell
+pnpm -C apps/api test
+```
+
+- Lint y typecheck:
+
+```powershell
+pnpm run lint
+pnpm run typecheck
+```
+
+## Seguridad y Errores
+
+- Middlewares: `helmet`, `cors` con `CORS_ORIGIN`, `cookie-parser`, `pino-http` para logs, rate limit en login.
+- Formato de error consistente y sin filtrar stack al cliente.
+- Cookies `httpOnly`, `sameSite=lax`, `secure` en producción.
+
+## Paginación por Cursor (Detalles)
+
+- Orden estable: `createdAt DESC, id DESC`.
+- Cursor: `base64("{createdAtISO}|{id}")`.
+- Al pedir la página siguiente, usar `nextCursor` tal cual fue devuelto.
+
+## RBAC (Permisos por Proyecto)
+
+- `REPORTER`: ver y comentar.
+- `MAINTAINER`: crear issues, cambiar `status`/`assignee`.
+- `OWNER`: todo, incluyendo agregar miembros.
+
+## Troubleshooting
+
+- `Invalid environment variables`: revisa `apps/api/.env` y los valores requeridos en `apps/api/src/env.ts`.
+- `Prisma migrate` falla: confirma que Docker Postgres está arriba (`docker compose ps`) y `DATABASE_URL` apunta a `issue_tracker`.
+- `CORS` bloquea llamadas: verifica `CORS_ORIGIN` en `.env` y que la Web corre en `http://localhost:5173`.
+- `401 UNAUTHENTICATED`: asegúrate de haber hecho login; las llamadas del cliente incluyen `credentials: 'include'`.
+
+## Trade-offs y Decisiones
+
+- Refresh token con rotación y persistencia del hash para revocación puntual.
+- Generación de `number` por proyecto vía `project_counters` y SQL `UPDATE ... RETURNING` dentro de transacción.
+- Optimistic locking en `PATCH /issues/:issueId` usando `version` + `updateMany` atómico.
+- Búsqueda `q` por `contains` insensible (FTS opcional a futuro).
+- `api.onUnauthorized` disponible para implementar refresh automático en el cliente si se requiere.
+
+---
