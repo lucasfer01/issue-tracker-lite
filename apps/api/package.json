@@ -12,7 +12,8 @@
     "prisma:seed": "tsx prisma/seed.ts",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "check": "pnpm run typecheck && pnpm run test"
+    "check": "pnpm run typecheck && pnpm run test",
+    "lint": "eslint src prisma/seed.ts --ext .ts"
   },
   "dependencies": {
     "@prisma/client": "^5.12.1",

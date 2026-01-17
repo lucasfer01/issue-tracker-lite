@@ -11,9 +11,16 @@
     "test": "pnpm -C apps/api test",
     "format": "prettier -w .",
     "typecheck": "pnpm -C apps/api run typecheck && pnpm -C apps/web run typecheck",
-    "check": "pnpm -C apps/api run check && pnpm -C apps/web run check"
+    "check": "pnpm -C apps/api run check && pnpm -C apps/web run check",
+    "lint": "eslint apps/api/src apps/web/src packages/shared/src --ext .ts,.tsx"
   },
   "devDependencies": {
+    "@typescript-eslint/eslint-plugin": "^8.53.0",
+    "@typescript-eslint/parser": "^8.53.0",
+    "eslint": "^9.39.2",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-react": "^7.37.5",
+    "eslint-plugin-react-hooks": "^7.0.1",
     "prettier": "^3.2.5"
   }
 }
