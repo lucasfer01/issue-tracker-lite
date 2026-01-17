@@ -62,17 +62,17 @@ export const issuesRouter = (env: Env) => {
       { description: { contains: q, mode: 'insensitive' } },
     ];
 
-    const items = await prisma.issue.findMany({
+    const itemsPlusOne = await prisma.issue.findMany({
       where: cursorFilter ? { AND: [where, cursorFilter] } : where,
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-      take: limit,
+      take: limit + 1,
     });
 
-    let nextCursor: string | null = null;
-    if (items.length === limit) {
-      const last = items[items.length - 1];
-      nextCursor = encodeCursor({ createdAt: last.createdAt.toISOString(), id: last.id });
-    }
+    const items = itemsPlusOne.slice(0, limit);
+    const hasMore = itemsPlusOne.length > limit;
+    const nextCursor = hasMore
+      ? encodeCursor({ createdAt: items[items.length - 1].createdAt.toISOString(), id: items[items.length - 1].id })
+      : null;
 
     res.json({ items, nextCursor });
   });
